@@ -22,7 +22,7 @@ apt update && apt-get install bridge-utils net-tools conntrack ngrep jq tree unz
 echo "192.168.10.10  k3s-s" >> /etc/hosts
 echo "192.168.10.101 k3s-w1" >> /etc/hosts
 echo "192.168.10.102 k3s-w2" >> /etc/hosts
-echo "192.168.10.103 k3s-w3" >> /etc/hosts
+echo "192.168.10.200 testpc" >> /etc/hosts
 
 # Install k3s-agent
 curl -sfL https://get.k3s.io | K3S_URL=https://192.168.10.10:6443 K3S_TOKEN=kanstoken  sh -s - --node-ip 192.168.10.10$1
