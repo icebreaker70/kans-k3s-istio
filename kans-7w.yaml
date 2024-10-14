@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "<<<<< Deploy EC2 >>>>>"
+        Parameters:
+          - KeyName
+          - SgIngressSshCidr
+          - MyInstanceType
+          - LatestAmiId
+
+      - Label:
+          default: "<<<<< Region AZ >>>>>"
+        Parameters:
+          - TargetRegion
+          - AvailabilityZone1
+          - AvailabilityZone2
+
+      - Label:
+          default: "<<<<< VPC Subnet >>>>>"
+        Parameters:
+          - VpcBlock
+          - PublicSubnet1Block
+          - PublicSubnet2Block
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  SgIngressSshCidr:
+    Description: The IP address range that can be used to communicate to the EC2 instances.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  MyInstanceType:
+    Description: Enter EC2 Type(Spec) Ex) t2.micro.
+    Type: String
+    Default: t3.xlarge
+  LatestAmiId:
+    Description: (DO NOT CHANGE)
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    AllowedValues:
+      - /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+  TargetRegion:
+    Type: String
+    Default: ap-northeast-2
+  AvailabilityZone1:
+    Type: String
+    Default: ap-northeast-2a
+  AvailabilityZone2:
+    Type: String
+    Default: ap-northeast-2c
+
+  VpcBlock:
+    Type: String
+    Default: 192.168.0.0/16
+  PublicSubnet1Block:
+    Type: String
+    Default: 192.168.10.0/24
+  PublicSubnet2Block:
+    Type: String
+    Default: 192.168.20.0/24
+
+Resources:
+# VPC
+  KansVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Kans-VPC
+
+# PublicSubnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone1
+      CidrBlock: !Ref PublicSubnet1Block
+      VpcId: !Ref KansVPC
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Kans-PublicSubnet1
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone2
+      CidrBlock: !Ref PublicSubnet2Block
+      VpcId: !Ref KansVPC
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Kans-PublicSubnet2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref KansVPC
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref KansVPC
+      Tags:
+        - Key: Name
+          Value: Kans-PublicSubnetRouteTable
+  PublicSubnetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicSubnetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicSubnetRouteTable
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicSubnetRouteTable
+
+
+# EC2 Hosts
+  EC2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Kans EC2 Security Group
+      VpcId: !Ref KansVPC
+      Tags:
+        - Key: Name
+          Value: Kans-SG
+      SecurityGroupIngress:
+      - IpProtocol: '-1'
+        CidrIp: !Ref SgIngressSshCidr
+      - IpProtocol: '-1'
+        CidrIp: !Ref VpcBlock
+      - IpProtocol: '-1'
+        CidrIp: 10.10.0.0/16
+      - IpProtocol: '-1'
+        CidrIp: 172.16.0.0/16
+
+  EC21:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref MyInstanceType
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: k3s-s
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          GroupSet:
+          - !Ref EC2SG
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 192.168.10.10
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            hostnamectl --static set-hostname k3s-s
+
+            # Config convenience
+            echo 'alias vi=vim' >> /etc/profile
+            echo "sudo su -" >> /home/ubuntu/.bashrc
+            ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+
+            # Disable ufw & apparmor 
+            systemctl stop ufw && systemctl disable ufw
+            systemctl stop apparmor && systemctl disable apparmor
+
+            # Install packages
+            apt update && apt-get install bridge-utils net-tools conntrack ngrep jq tree unzip kubecolor kubetail -y
+
+            # local dns - hosts file
+            echo "192.168.10.10 k3s-s" >> /etc/hosts
+            echo "192.168.10.101 k3s-w1" >> /etc/hosts
+            echo "192.168.10.102 k3s-w2" >> /etc/hosts
+
+            # Install k3s-server
+            curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=" --disable=traefik"  sh -s - server --token kanstoken --cluster-cidr "172.16.0.0/16" --service-cidr "10.10.200.0/24" --write-kubeconfig-mode 644 
+
+            # Change kubeconfig
+            echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> /etc/profile
+
+            # Install Helm
+            curl -s https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+
+            # Alias kubectl to k
+            echo 'alias kc=kubecolor' >> /etc/profile
+            echo 'alias k=kubectl' >> /etc/profile
+            echo 'complete -o default -F __start_kubectl k' >> /etc/profile
+
+            # kubectl Source the completion
+            source <(kubectl completion bash)
+            echo 'source <(kubectl completion bash)' >> /etc/profile
+            
+            # Install Kubectx & Kubens
+            git clone https://github.com/ahmetb/kubectx /opt/kubectx
+            ln -s /opt/kubectx/kubens /usr/local/bin/kubens
+            ln -s /opt/kubectx/kubectx /usr/local/bin/kubectx
+
+            # Install Kubeps & Setting PS1
+            git clone https://github.com/jonmosco/kube-ps1.git /root/kube-ps1
+            cat <<"EOT" >> ~/.bash_profile
+            source /root/kube-ps1/kube-ps1.sh
+            KUBE_PS1_SYMBOL_ENABLE=true
+            function get_cluster_short() {
+              echo "$1" | cut -d . -f1
+            }
+            KUBE_PS1_CLUSTER_FUNCTION=get_cluster_short
+            KUBE_PS1_SUFFIX=') '
+            PS1='$(kube_ps1)'$PS1
+            EOT
+
+  EC22:
+    Type: AWS::EC2::Instance
+    DependsOn: EC21
+    Properties:
+      InstanceType: !Ref MyInstanceType
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: k3s-w1
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          GroupSet:
+          - !Ref EC2SG
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 192.168.10.101
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            hostnamectl --static set-hostname k3s-w1
+
+            # Config convenience
+            echo 'alias vi=vim' >> /etc/profile
+            echo "sudo su -" >> /home/ubuntu/.bashrc
+            ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+
+            # Disable ufw & apparmor 
+            systemctl stop ufw && systemctl disable ufw
+            systemctl stop apparmor && systemctl disable apparmor
+
+            # Install packages
+            apt update && apt-get install bridge-utils net-tools conntrack ngrep jq tree unzip kubecolor kubetail -y
+
+            # local dns - hosts file
+            echo "192.168.10.10 k3s-s" >> /etc/hosts
+            echo "192.168.10.101 k3s-w1" >> /etc/hosts
+            echo "192.168.10.102 k3s-w2" >> /etc/hosts
+
+            # Install k3s-agent
+            curl -sfL https://get.k3s.io | K3S_URL=https://192.168.10.10:6443 K3S_TOKEN=kanstoken  sh -s -
+
+  EC23:
+    Type: AWS::EC2::Instance
+    DependsOn: EC21
+    Properties:
+      InstanceType: !Ref MyInstanceType
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: k3s-w2
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          GroupSet:
+          - !Ref EC2SG
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 192.168.10.102
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            hostnamectl --static set-hostname k3s-w2
+
+            # Config convenience
+            echo 'alias vi=vim' >> /etc/profile
+            echo "sudo su -" >> /home/ubuntu/.bashrc
+            ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+
+            # Disable ufw & apparmor 
+            systemctl stop ufw && systemctl disable ufw
+            systemctl stop apparmor && systemctl disable apparmor
+
+            # Install packages
+            apt update && apt-get install bridge-utils net-tools conntrack ngrep jq tree unzip kubecolor kubetail -y
+
+            # local dns - hosts file
+            echo "192.168.10.10 k3s-s" >> /etc/hosts
+            echo "192.168.10.101 k3s-w1" >> /etc/hosts
+            echo "192.168.10.102 k3s-w2" >> /etc/hosts
+
+            # Install k3s-agent
+            curl -sfL https://get.k3s.io | K3S_URL=https://192.168.10.10:6443 K3S_TOKEN=kanstoken  sh -s -
+
+  EC24:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId: !Ref LatestAmiId
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: testpc
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet1
+          GroupSet:
+          - !Ref EC2SG
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 192.168.10.200
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            hostnamectl --static set-hostname testpc
+
+            # Config convenience
+            echo 'alias vi=vim' >> /etc/profile
+            echo "sudo su -" >> /home/ubuntu/.bashrc
+            ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+
+            # Disable ufw & apparmor 
+            systemctl stop ufw && systemctl disable ufw
+            systemctl stop apparmor && systemctl disable apparmor
+
+            # Install packages
+            apt update && apt-get install net-tools ngrep jq tree unzip apache2 -y
+
+            # local dns - hosts file
+            echo "192.168.10.10 k3s-s" >> /etc/hosts
+            echo "192.168.10.101 k3s-w1" >> /etc/hosts
+            echo "192.168.10.102 k3s-w2" >> /etc/hosts
+
+
+Outputs:
+  Serverhost:
+    Value: !GetAtt EC21.PublicIp
