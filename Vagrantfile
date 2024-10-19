@@ -38,8 +38,8 @@ Vagrant.configure("2") do |config|
         v.customize ["modifyvm", :id, "--groups", "/#{proj_N}"]
         v.customize ["modifyvm", :id, "--nicpromisc2", "allow-vms"]
         v.name = "#{proj_N}-k3s-w#{i}"
-        v.memory = 2048
-        v.cpus = 1
+        v.memory = 4096
+        v.cpus = 2
         v.linked_clone = true
       end
       subconfig.vm.hostname = "k3s-w#{i}"
@@ -58,8 +58,8 @@ Vagrant.configure("2") do |config|
         v.customize ["modifyvm", :id, "--groups", "/#{proj_N}"]
         v.customize ["modifyvm", :id, "--nicpromisc2", "allow-vms"]
         v.name = "#{proj_N}-testpc"
-        v.memory = 2048
-        v.cpus = 2
+        v.memory = 512
+        v.cpus = 1
         v.linked_clone = true
       end
       subconfig.vm.hostname = "testpc"

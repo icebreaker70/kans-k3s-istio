@@ -1,0 +1,42 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: istiocontrolplane-1-20-1
+  namespace: istio-system
+spec:
+  revision: 1-20-1
+  profile: default
+  components:
+    base:
+      enabled: true
+    pilot:
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+    egressGateways:
+      - name: istio-egressgateway
+        enabled: false
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        label:
+          istio: ingressgateway
+        k8s:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          hpaSpec:
+            minReplicas: 1
+          service:
+            externalTrafficPolicy: Cluster
+            type: NodePort
